@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Minecraft-Themed Block Editor</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: 'Minecraft', sans-serif;
+      overflow: hidden;
+    }
+
+    #block-selector {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      background: rgba(0, 0, 0, 0.8);
+      padding: 10px;
+      border-radius: 5px;
+      display: flex;
+      gap: 10px;
+    }
+
+    #block-selector button {
+      width: 50px;
+      height: 50px;
+      border: 2px solid white;
+      background-color: transparent;
+      cursor: pointer;
+    }
+
+    #block-selector button.selected {
+      border-color: yellow;
+    }
+
+    canvas {
+      display: block;
+    }
+
+    .donation-box {
+      border: 2px solid #55aa55;
+      border-radius: 10px;
+      padding: 20px;
+      display: inline-block;
+      margin-top: 50px;
+      position: absolute;
+      top: 50%;
+      right: 50px;
+      transform: translate(0, -100%);
+    }
+    input[type="number"] {
+      font-size: 16px;
+      padding: 5px;
+      margin: 10px 0;
+    }
+    button {
+      font-size: 16px;
+      padding: 10px 20px;
+      background-color: #55aa55;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      color: white;
+    }
+    button:hover {
+      background-color: #77cc77;
+    }
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.152.2/build/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.152.2/examples/js/controls/OrbitControls.js"></script>
+</head>
+<body>
+  <div id="block-selector">
+    <button id="wood" class="selected" style="background-color: #8B4513;"></button>
+    <button id="stone" style="background-color: #A9A9A9;"></button>
+    <button id="dirt" style="background-color: #8B4513; border-bottom: 20px solid #5A3C2B;"></button>
+  </div>
+  <div class="donation-box">
+    <p>Select your donation amount (minimum $2 USD):</p>
+    <input type="number" id="donation-amount" min="2" step="0.01" placeholder="Enter amount in USD">
+    <button id="donate-button">Donate</button>
+  </div>
+  <script src="https://js.stripe.com/v3/"></script>
+  <script>
+    const stripe = Stripe('pk_live_51NKbKcDeSZuGed4Stcxzw6ifYRxmu1bFmfw96PIGZFFwObJSMonXu3iWIQye13UQMgCtO1Q792v7q32b097YE1cA00h8U7YBCy');
+
+    document.getElementById('donate-button').addEventListener('click', async () => {
+      const amount = parseFloat(document.getElementById('donation-amount').value);
+      if (isNaN(amount) || amount < 2) {
+        alert('Please enter an amount of at least $2 USD.');
+        return;
+      }
+
+      const response = await fetch('/create-checkout-session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ amount }),
+      });
+
+      const session = await response.json();
+      if (session.error) {
+        alert('Error: ' + session.error);
+        return;
+      }
+
+      stripe.redirectToCheckout({ sessionId: session.id });
+    });
+  </script>
+  <script type="module">
+    import { OrbitControls } from "https://unpkg.com/three@0.112/examples/jsm/controls/OrbitControls.js";
+
+    const blockTypes = {
+      wood: 0x8B4513,
+      stone: 0xA9A9A9,
+      dirt: 0x5A3C2B
+    };
+
+    let selectedBlock = 'wood';
+
+    document.querySelectorAll('#block-selector button').forEach(button => {
+      button.addEventListener('click', () => {
+        document.querySelectorAll('#block-selector button').forEach(btn => btn.classList.remove('selected'));
+        button.classList.add('selected');
+        selectedBlock = button.id;
+      });
+    });
+
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+    const renderer = new THREE.WebGLRenderer();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.body.appendChild(renderer.domElement);
+
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.target.set(2.5, 0, 2.5);
+    controls.update();
+
+    const skyboxLoader = new THREE.CubeTextureLoader();
+    const skyboxTexture = skyboxLoader.load([
+      'textures/skybox/px.png', 'textures/skybox/nx.png',
+      'textures/skybox/py.png', 'textures/skybox/ny.png',
+      'textures/skybox/pz.png', 'textures/skybox/nz.png'
+    ]);
+    scene.background = skyboxTexture;
+
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+    const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+    directionalLight.position.set(10, 15, 10);
+    scene.add(ambientLight, directionalLight);
+
+    const blocks = [];
+    for (let x = 0; x < 5; x++) {
+      for (let z = 0; z < 5; z++) {
+        const geometry = new THREE.BoxGeometry(1, 1, 1);
+        const material = new THREE.MeshStandardMaterial({ color: 0xA9A9A9 });
+        const block = new THREE.Mesh(geometry, material);
+        block.position.set(x, 0, z);
+        scene.add(block);
+        blocks.push(block);
+      }
+    }
+
+    camera.position.set(5, 7, 10);
+    camera.lookAt(2.5, 0, 2.5);
+
+    const raycaster = new THREE.Raycaster();
+    const mouse = new THREE.Vector2();
+
+    function onClick(event) {
+      event.preventDefault();
+
+      mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+      mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+      raycaster.setFromCamera(mouse, camera);
+
+      const intersects = raycaster.intersectObjects(blocks);
+
+      if (intersects.length > 0) {
+        const intersect = intersects[0];
+
+        if (event.type === 'contextmenu') {
+          const normal = intersect.face.normal;
+          const newPosition = intersect.object.position.clone().add(normal);
+
+          const geometry = new THREE.BoxGeometry(1, 1, 1);
+          const material = new THREE.MeshStandardMaterial({ color: blockTypes[selectedBlock] });
+          const block = new THREE.Mesh(geometry, material);
+          block.position.copy(newPosition);
+
+          scene.add(block);
+          blocks.push(block);
+        } else if (event.type === 'click') {
+          if (blocks.includes(intersect.object)) {
+            scene.remove(intersect.object);
+            blocks.splice(blocks.indexOf(intersect.object), 1);
+          }
+        }
+      }
+    }
+
+    window.addEventListener('click', onClick);
+    window.addEventListener('contextmenu', onClick);
+
+    function animate() {
+      requestAnimationFrame(animate);
+      renderer.render(scene, camera);
+    }
+    animate();
+  </script>
+</body>
+</html>
